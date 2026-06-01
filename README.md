@@ -8,9 +8,9 @@
 ```bash
 javac -d bin (Get-ChildItem -Recurse -Filter *.java | ForEach-Object { $_.FullName })
 ```
-2. Lancer pour chaque Worker (changer worker-1, par worker-2, worker-3,...)
+2. Lancer un Worker (peut être utilisée plusieurs fois pour plusieurs Workers)
 ```bash
-java -cp bin RayTracerWorker simple.txt 720 720 worker-1
+java -cp bin RayTracerWorker simple.txt 720 720
 ```
 
 3. Lancer le Master après que tous les Workers soient lancés

@@ -7,6 +7,8 @@ import java.rmi.NotBoundException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -14,7 +16,6 @@ import java.util.concurrent.Future;
 import raytracer.Disp;
 import raytracer.Scene;
 import raytracer.Image;
-
 public class LancerRaytracer {
 
     public static String aide = "Raytracer : synthèse d'image par lancé de rayons (https://en.wikipedia.org/wiki/Ray_tracing_(graphics))\n\nUsage : java LancerRaytracer [fichier-scène] [largeur] [hauteur]\n\tjava LancerRaytracer master [fichier-scène] [largeur] [hauteur] [hote-registre] [port]\n\tjava LancerRaytracer worker [fichier-scène] [largeur] [hauteur] [nom] [hote-registre] [port]\n";
@@ -116,11 +117,23 @@ public class LancerRaytracer {
 
         // Récupérer les références distantes des workers publiés dans le registre.
         List<InterfaceRaytracer> workers = new ArrayList<>();
+        List<String> assignedNames = new ArrayList<>();
+        List<String> bindingNames = new ArrayList<>();
+        int assignIndex = 1;
         for(String name : names){
             try{
-                workers.add((InterfaceRaytracer) registry.lookup(name));
-            }catch(RemoteException | NotBoundException e){
-                throw new RuntimeException(e);
+                InterfaceRaytracer w = (InterfaceRaytracer) registry.lookup(name);
+                try{
+                    // tester la joignabilité
+                    w.computeRMI(0, 0, 1, 1);
+                    workers.add(w);
+                    assignedNames.add("worker-" + (assignIndex++));
+                    bindingNames.add(name);
+                }catch(Exception checkEx){
+                    try{ registry.unbind(name); System.out.println("Removed dead binding: " + name); }catch(Exception e){}
+                }
+            }catch(Exception e){
+                // ignorer bindings inaccessibles
             }
         }
 
@@ -134,32 +147,45 @@ public class LancerRaytracer {
         // Découper l'image en bandes horizontales pour les envoyer en parallèle.
         int stripeHeight = (hauteur + workerCount - 1) / workerCount;
         ExecutorService executor = Executors.newFixedThreadPool(workerCount);
-        List<Future<Tile>> futures = new ArrayList<>();
+        CompletionService<Tile> completion = new ExecutorCompletionService<>(executor);
 
         Instant debut = Instant.now();
+        int tasksSubmitted = 0;
         for(int index = 0; index < workerCount; index++){
             final int y0 = index * stripeHeight;
             final int tileHeight = Math.min(stripeHeight, hauteur - y0);
             final InterfaceRaytracer worker = workers.get(index);
-            if(tileHeight <= 0){
-                continue;
-            }
-            futures.add(executor.submit(new Callable<Tile>() {
+            final String assignedName = assignedNames.get(index);
+            final String bindingName = bindingNames.get(index);
+            if(tileHeight <= 0){ continue; }
+            tasksSubmitted++;
+            completion.submit(new Callable<Tile>(){
                 @Override
-                public Tile call() throws Exception {
-                    Image image = worker.computeRMI(0, y0, largeur, tileHeight);
-                    return new Tile(y0, image);
+                public Tile call() throws Exception{
+                    System.out.println("Invoking " + assignedName + " for rows " + y0 + ".." + (y0+tileHeight-1));
+                    try{
+                        Image image = worker.computeRMI(0, y0, largeur, tileHeight);
+                        return new Tile(y0, image);
+                    }catch(Exception callEx){
+                        System.out.println("Worker failure " + assignedName + " ("+bindingName+"): " + callEx.getMessage());
+                        try{ registry.unbind(bindingName); System.out.println("Unbound dead worker: " + bindingName); }catch(Exception e){}
+                        return new Tile(y0, null);
+                    }
                 }
-            }));
+            });
         }
 
-        for(Future<Tile> future : futures){
+        int received = 0;
+        while(received < tasksSubmitted){
             try{
-                Tile tile = future.get();
-                disp.setImage(tile.image, 0, tile.y0);
+                Future<Tile> f = completion.take();
+                Tile tile = f.get();
+                if(tile.image != null){ disp.setImage(tile.image, 0, tile.y0); }
+                else{ System.out.println("Tile for rows " + tile.y0 + " was not rendered due to worker failure."); }
+                received++;
             }catch(Exception e){
-                executor.shutdownNow();
-                throw new RuntimeException(e);
+                System.out.println("A task failed: " + e.getMessage());
+                received++;
             }
         }
 

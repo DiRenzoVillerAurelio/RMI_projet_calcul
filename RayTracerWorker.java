@@ -22,12 +22,24 @@ public class RayTracerWorker extends UnicastRemoteObject implements InterfaceRay
         String sceneFile = args.length > 0 ? args[0] : "simple.txt";
         int totalWidth = args.length > 1 ? Integer.parseInt(args[1]) : 512;
         int totalHeight = args.length > 2 ? Integer.parseInt(args[2]) : 512;
-        String name = args.length > 3 ? args[3] : "worker-1";
+        String providedName = args.length > 3 ? args[3] : null;
         String host = args.length > 4 ? args[4] : "localhost";
         int port = args.length > 5 ? Integer.parseInt(args[5]) : 1099;
 
         if ("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)) {
             System.setProperty("java.rmi.server.hostname", "127.0.0.1");
+        }
+
+        String name = null;
+        Registry registryForNaming = null;
+        try {
+            registryForNaming = LocateRegistry.getRegistry(host, port);
+            String[] bindings = registryForNaming.list();
+            int count = 0;
+            for (String b : bindings) if (b.startsWith("worker-")) count++;
+            name = providedName != null && providedName.length() > 0 ? providedName : "worker-" + (count + 1);
+        } catch (Throwable t) {
+            name = providedName != null && providedName.length() > 0 ? providedName : "worker-1";
         }
 
         RayTracerWorker worker = new RayTracerWorker(sceneFile, totalWidth, totalHeight);
