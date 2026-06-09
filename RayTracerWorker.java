@@ -15,47 +15,64 @@ public class RaytracerWorker extends UnicastRemoteObject implements InterfaceRay
 
     @Override
     public Image computeRMI(int x, int y, int width, int height) throws RemoteException {
-        // C'est cette méthode qui exécute le calcul réel du Raytracer à la demande du Master
+        // C'est cette méthode qui exécute le calcul réel du Raytracer à la demande du
+        // Master
+        Image resultat = scene.compute(x, y, width, height);
+
+        // Ajoutez ceci pour le diagnostic :
+        System.out.println("Taille de l'image calculée : " + resultat.getWidth() + "x" + resultat.getHeight());
+        System.out.println("Couleur du premier pixel localement : " + resultat.getPixel(0, 0)); // (Adaptez la méthode
+                                                                                                // selon votre code)
+
         return scene.compute(x, y, width, height);
     }
 
     public static void main(String[] args) {
-        // 1. Récupération des arguments (Fichier, dimensions)
-        String sceneFile = args.length > 0 ? args[0] : "simple.txt";
-        int totalWidth = args.length > 1 ? Integer.parseInt(args[1]) : 512;
-        int totalHeight = args.length > 2 ? Integer.parseInt(args[2]) : 512;
-        
+        // Récupération des arguments (Fichier, dimensions)
+        String sceneFile = args.length > 1 ? args[1] : "simple.txt";
+        int totalWidth = args.length > 2 ? Integer.parseInt(args[2]) : 512;
+        int totalHeight = args.length > 3 ? Integer.parseInt(args[3]) : 512;
+
         // IP de CETTE machine (la machine où tourne ce worker précis)
-        String myIp = "10.247.22.44"; 
-        int port = 1099;
+       String myIp = "10.247.22.44"; 
+    int port = 1099;
 
+    try {
+        System.setProperty("java.rmi.server.hostname", myIp);
+
+        Registry registry;
         try {
-            // 2. Configuration RMI fondamentale pour le réseau
-            System.setProperty("java.rmi.server.hostname", myIp);
+            // 1. On essaie de récupérer le registre existant
+            registry = LocateRegistry.getRegistry(port);
+            registry.list(); // Appel test pour voir si le registre est bien là
+            System.out.println("Registre existant trouvé, connexion...");
+        } catch (Exception e) {
+            // 2. Si ça échoue, on le crée (c'est le premier worker)
+            System.out.println("Aucun registre trouvé, création du registre...");
+            registry = LocateRegistry.createRegistry(port);
+        }
 
-            // 3. Création du registre LOCAL sur cette machine
-            Registry registry = LocateRegistry.createRegistry(port);
+        // 3. Logique pour le nommage (toujours le même code)
+        String name = "RaytracerWorker";
+        try {
+            String[] bindings = registry.list();
+            int count = 0;
+            for (String b : bindings) { if (b.startsWith("worker-")) count++; }
+            name = "worker-" + (count + 1);
+        } catch (Exception e) { name = "worker-1"; }
 
-            // 4. RÉINTÉGRATION DE VOTRE LOGIQUE : Détermination dynamique du nom du Worker
-            String name = "RaytracerWorker";
-            try {
-                String[] bindings = registry.list();
-                int count = 0;
-                for (String b : bindings) {
-                    if (b.startsWith("worker-")) {
-                        count++;
-                    }
-                }
-                name = "worker-" + (count + 1);
-            } catch (Throwable t) {
-                name = "worker-1"; // Nom par défaut si le listing échoue
-            }
+        // 4. Enregistrement
+        RaytracerWorker worker = new RaytracerWorker(sceneFile, totalWidth, totalHeight);
+        registry.rebind(name, worker);
+        
+        System.out.println("Worker prêt sous le nom : " + name);
 
-            // 5. Instanciation et publication du Worker sous son nom attribué
-            RaytracerWorker worker = new RaytracerWorker(sceneFile, totalWidth, totalHeight);
+   
+            
             registry.rebind(name, worker);
 
-            // Optionnel : On enregistre aussi une liaison générique pour faciliter la détection par le Master
+            // Optionnel : On enregistre aussi une liaison générique pour faciliter la
+            // détection par le Master
             registry.rebind("RaytracerWorker", worker);
 
             System.out.println("Worker prêt et enregistré localement !");
@@ -63,8 +80,10 @@ public class RaytracerWorker extends UnicastRemoteObject implements InterfaceRay
             System.out.println(" -> Adresse réseau     : " + myIp + ":" + port);
 
         } catch (Exception e) {
-            System.err.println("Erreur critique au démarrage du Worker :");
-            e.printStackTrace();
+            System.err.println("ERREUR CRITIQUE : Impossible de charger " + sceneFile);
+            System.err.println("Chemin courant du processus : " + System.getProperty("user.dir"));
+            e.printStackTrace(); // Cela affichera le vrai chemin où Java cherche le fichier
+            throw new RuntimeException("Fichier de scène introuvable", e);
         }
     }
 }

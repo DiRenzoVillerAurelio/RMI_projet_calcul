@@ -29,10 +29,10 @@ public class LancerRaytracer {
             runMaster(args);
             return;
         }
-        
+
         System.out.println(aide);
     }
-    
+
     private static void runWorker(String[] args) {
         try {
             RaytracerWorker.main(args);
@@ -46,107 +46,91 @@ public class LancerRaytracer {
         int largeur = args.length > 2 ? Integer.parseInt(args[2]) : 512;
         int hauteur = args.length > 3 ? Integer.parseInt(args[3]) : 512;
         int port = 1099;
-        
-        // TABLEAU DES WORKERS : Ajoutez ici les IPs de tous vos ordinateurs disponibles
+
+        // Vos machines sur le réseau
         String[] hosts = {
-            "10.247.22.44",
-            // "10.247.22.56", // Décommentez ou ajoutez d'autres IPs ici
+                "10.247.22.44",
+                // Ajoutez d'autres IPs ici
         };
 
-        System.out.println("Master : Recherche des workers...");
-        List<InterfaceRaytracer> workers = new ArrayList<>();
-        List<String> workerNames = new ArrayList<>();
+        System.out.println("Master : Recherche dynamique de tous les workers...");
+        List<InterfaceRaytracer> allWorkers = new ArrayList<>();
 
-        // 1. Connexion à tous les workers listés dans le tableau
+        // 1. Connexion et découverte dynamique
         for (String ip : hosts) {
             try {
                 Registry registry = LocateRegistry.getRegistry(ip, port);
-                InterfaceRaytracer worker = (InterfaceRaytracer) registry.lookup("RaytracerWorker");
-                
-                // Petit test pour s'assurer que le worker répond bien
-                worker.computeRMI(0, 0, 1, 1); 
-                
-                workers.add(worker);
-                workerNames.add(ip);
-                System.out.println(" -> Connexion réussie au worker sur " + ip);
+                String[] bindings = registry.list(); // On récupère tous les noms enregistrés
+
+                for (String name : bindings) {
+                    // On ne prend que les workers dynamiques (worker-1, worker-2, etc.)
+                    if (name.startsWith("worker-")) {
+                        InterfaceRaytracer worker = (InterfaceRaytracer) registry.lookup(name);
+                        allWorkers.add(worker);
+                        System.out.println(" -> Ajouté : " + name + " sur " + ip);
+                    }
+                }
             } catch (Exception e) {
-                System.err.println(" -> Worker injoignable sur " + ip + " : " + e.getMessage());
+                System.err.println(" -> Impossible de scanner la machine " + ip + " : " + e.getMessage());
             }
         }
 
         Disp disp = new Disp("Raytracer RMI", largeur, hauteur);
         Scene scene = new Scene(fichier_description, largeur, hauteur);
 
-        // 2. Si aucun worker n'est dispo, on calcule tout en local
-        if (workers.isEmpty()) {
-            System.out.println("Aucun worker disponible. Calcul en local (séquentiel)...");
-            Instant debut = Instant.now();
-            Image image = scene.compute(0, 0, largeur, hauteur);
-            Instant fin = Instant.now();
-            System.out.println("Image calculée en : " + Duration.between(debut, fin).toMillis() + " ms");
-            disp.setImage(image, 0, 0);
+        // 2. Vérification
+        if (allWorkers.isEmpty()) {
+            System.out.println("Aucun worker trouvé. Calcul local");
             return;
         }
 
-        // 3. Répartition du travail (Logique de parallélisation)
-        int workerCount = workers.size();
-        System.out.println("Calcul de l'image (" + largeur + "x" + hauteur + ") réparti sur " + workerCount + " noeud(s).");
-        
-        // Découper l'image en bandes horizontales pour les envoyer en parallèle
-        int stripeHeight = (hauteur + workerCount - 1) / workerCount;
-        ExecutorService executor = Executors.newFixedThreadPool(workerCount);
+        // 3. Répartition globale
+        int totalWorkerCount = allWorkers.size();
+        System.out.println("Calcul réparti sur " + totalWorkerCount + " workers au total.");
+
+        int stripeHeight = (hauteur + totalWorkerCount - 1) / totalWorkerCount;
+        ExecutorService executor = Executors.newFixedThreadPool(totalWorkerCount);
         CompletionService<Tile> completion = new ExecutorCompletionService<>(executor);
 
         Instant debut = Instant.now();
         int tasksSubmitted = 0;
 
-        for (int index = 0; index < workerCount; index++) {
+        // On boucle sur TOUS les workers trouvés
+        for (int index = 0; index < totalWorkerCount; index++) {
             final int y0 = index * stripeHeight;
             final int tileHeight = Math.min(stripeHeight, hauteur - y0);
-            final InterfaceRaytracer worker = workers.get(index);
-            final String workerName = workerNames.get(index);
+            final InterfaceRaytracer worker = allWorkers.get(index);
 
-            if (tileHeight <= 0) {
+            if (tileHeight <= 0)
                 continue;
-            }
-            
+
             tasksSubmitted++;
-            completion.submit(new Callable<Tile>() {
-                @Override
-                public Tile call() throws Exception {
-                    System.out.println("Envoi au worker (" + workerName + ") des lignes " + y0 + " à " + (y0 + tileHeight - 1));
-                    try {
-                        Image image = worker.computeRMI(0, y0, largeur, tileHeight);
-                        return new Tile(y0, image);
-                    } catch (Exception callEx) {
-                        System.err.println("Échec du calcul sur le worker (" + workerName + ") : " + callEx.getMessage());
-                        return new Tile(y0, null);
-                    }
+            completion.submit(() -> {
+                System.out.println("Envoi bandes " + y0 + " à " + (y0 + tileHeight));
+                try {
+                    Image image = worker.computeRMI(0, y0, largeur, tileHeight);
+                    return new Tile(y0, image);
+                } catch (Exception e) {
+                    return new Tile(y0, null);
                 }
             });
         }
 
-        // 4. Récupération et affichage des morceaux au fur et à mesure
+        // 4. Récupération (identique à votre code précédent)
         int received = 0;
         while (received < tasksSubmitted) {
             try {
-                Future<Tile> f = completion.take(); // Attend que le premier worker qui a fini donne son résultat
-                Tile tile = f.get();
-                if (tile.image != null) {
+                Tile tile = completion.take().get();
+                if (tile.image != null)
                     disp.setImage(tile.image, 0, tile.y0);
-                } else {
-                    System.err.println("La bande commençant à la ligne " + tile.y0 + " n'a pas pu être rendue.");
-                }
                 received++;
             } catch (Exception e) {
-                System.err.println("Une tâche RMI a échoué : " + e.getMessage());
                 received++;
             }
         }
 
         executor.shutdown();
-        Instant fin = Instant.now();
-        System.out.println("Image calculée en : " + Duration.between(debut, fin).toMillis() + " ms");
+        System.out.println("Calcul terminé en : " + Duration.between(debut, Instant.now()).toMillis() + " ms");
     }
 
     // Classe interne pour stocker un morceau d'image et sa position Y
