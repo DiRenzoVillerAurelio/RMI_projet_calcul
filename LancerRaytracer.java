@@ -7,12 +7,11 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
+
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 import raytracer.Disp;
 import raytracer.Scene;
@@ -54,19 +53,21 @@ public class LancerRaytracer {
         List<String> hosts = loadHostsFromFile("workers.txt");
 
         if (hosts.isEmpty()) {
-            System.out.println("Attention : Aucun hôte trouvé dans workers.txt. Calcul en local.");
+            System.out.println("Aucun worker trouvé dans workers.txt");
+            return ;
         }
-        System.out.println("Master : Recherche dynamique de tous les workers...");
+
+        System.out.println("Master : Recherche de tous les workers");
         List<InterfaceRaytracer> allWorkers = new ArrayList<>();
 
-        // 1. Connexion et découverte dynamique
+        // Connexion au registre RMI de chaque machine et récupération de tous les workers disponibles
         for (String ip : hosts) {
             try {
                 Registry registry = LocateRegistry.getRegistry(ip, port);
                 String[] bindings = registry.list(); // On récupère tous les noms enregistrés
 
                 for (String name : bindings) {
-                    // On ne prend que les workers dynamiques (worker-1, worker-2, etc.)
+                    
                     if (name.startsWith("worker-")) {
                         InterfaceRaytracer worker = (InterfaceRaytracer) registry.lookup(name);
                         allWorkers.add(worker);
@@ -74,13 +75,13 @@ public class LancerRaytracer {
                     }
                 }
             } catch (Exception e) {
-                System.err.println(" -> Impossible de scanner la machine " + ip + " : " + e.getMessage());
+                System.err.println(" - Impossible de scanner la machine " + ip + " : " + e.getMessage());
             }
         }
 
+        // Le Master impose la résolution à tous les workers connectés
         for (InterfaceRaytracer worker : allWorkers) {
             try {
-                // Le Master impose la résolution totale à tous les workers connectés
                 worker.configureScene(largeur, hauteur);
                 System.out.println("Worker configuré en " + largeur + "x" + hauteur);
             } catch (Exception e) {
@@ -91,13 +92,13 @@ public class LancerRaytracer {
         Disp disp = new Disp("Raytracer RMI", largeur, hauteur);
         Scene scene = new Scene(fichier_description, largeur, hauteur);
 
-        // 2. Vérification
+        // Vérification
         if (allWorkers.isEmpty()) {
-            System.out.println("Aucun worker trouvé. Calcul local");
+            System.out.println("Aucun worker trouvé.");
             return;
         }
 
-        // 3. Répartition globale
+        // Répartition globale
         int totalWorkerCount = allWorkers.size();
         System.out.println("Calcul réparti sur " + totalWorkerCount + " workers au total.");
 
@@ -108,7 +109,7 @@ public class LancerRaytracer {
         Instant debut = Instant.now();
         int tasksSubmitted = 0;
 
-        // On boucle sur TOUS les workers trouvés
+        // On boucle sur tous les workers disponibles
         for (int index = 0; index < totalWorkerCount; index++) {
             final int y0 = index * stripeHeight;
             final int tileHeight = Math.min(stripeHeight, hauteur - y0);
@@ -129,7 +130,7 @@ public class LancerRaytracer {
             });
         }
 
-        // 4. Récupération (identique à votre code précédent)
+        // Récupération des résultats au fur et à mesure de leur disponibilité
         int received = 0;
         while (received < tasksSubmitted) {
             try {
@@ -157,6 +158,7 @@ public class LancerRaytracer {
         }
     }
 
+    // Lis workers.txt et retourne une liste d'adresses IP 
     private static List<String> loadHostsFromFile(String filename) {
         List<String> hosts = new ArrayList<>();
         try {
