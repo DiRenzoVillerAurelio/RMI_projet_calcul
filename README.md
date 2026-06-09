@@ -10,10 +10,10 @@ javac -d bin (Get-ChildItem -Recurse -Filter *.java | ForEach-Object { $_.FullNa
 ```
 2. Lancer un Worker (peut être utilisée plusieurs fois pour plusieurs Workers)
 ```bash
-java -cp bin RayTracerWorker simple.txt 720 720 localhost
+java -cp bin LancerRaytracer worker simple.txt 720 720 localhost
 ```
 
 3. Lancer le Master après que tous les Workers soient lancés
 ```bash
 java -cp bin LancerRaytracer master simple.txt 720 720 localhost
-``` 
+```
