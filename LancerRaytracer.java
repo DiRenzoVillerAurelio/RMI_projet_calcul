@@ -97,14 +97,66 @@ public class LancerRaytracer {
         String host = args.length > 4 ? args[4] : "localhost";
         int port = args.length > 5 ? Integer.parseInt(args[5]) : 1099;
 
+        System.out.println("Démarrage du service master sur le port " + port + "...");
+        final Registry registry;
+        Registry tempReg = null;
+        try {
+            final Registry createdReg = LocateRegistry.createRegistry(port);
+            tempReg = createdReg;
+            System.out.println("Service RMI lancé sur le port " + port + ".");
+
+            RegistryProxy proxy = new RegistryProxy() {
+                public void rebind(String n, java.rmi.Remote obj) throws RemoteException {
+                    createdReg.rebind(n, obj);
+                }
+            };
+            java.rmi.server.UnicastRemoteObject.exportObject(proxy, 0);
+            createdReg.rebind("RegistryProxy", proxy);
+        } catch (Exception e) {
+            System.out.println("Le registre existe déjà, récupération...");
+            try {
+                tempReg = LocateRegistry.getRegistry(host, port);
+            } catch (RemoteException re) {
+                throw new RuntimeException(re);
+            }
+        }
+        registry = tempReg;
+
+        System.out.println("En attente de workers. Appuyez sur ENTRÉE pour lancer le calcul");
+
+        final boolean[] running = { true };
+        Thread watcher = new Thread(() -> {
+            java.util.Set<String> knownWorkers = new java.util.HashSet<>();
+            try {
+                while (running[0]) {
+                    String[] currentNames = registry.list();
+                    for (String name : currentNames) {
+                        if (name.startsWith("worker-") && knownWorkers.add(name)) {
+                            System.out.println("Nouveau worker connecté : " + name);
+                        }
+                    }
+                    Thread.sleep(500);
+                }
+            } catch (Exception e) {
+            }
+        });
+        watcher.setDaemon(true);
+        watcher.start();
+
+        try {
+            System.in.read();
+            // Consommer le reste de la ligne (CR/LF)
+            while (System.in.available() > 0) {
+                System.in.read();
+            }
+            running[0] = false;
+        } catch (Exception e) {
+        }
+
+        System.out.println("Lancement du calcul...");
+
         Disp disp = new Disp("Raytracer RMI", largeur, hauteur);
         Scene scene = new Scene(fichier_description, largeur, hauteur);
-        Registry registry;
-        try {
-            registry = LocateRegistry.getRegistry(host, port);
-        } catch (RemoteException e) {
-            throw new RuntimeException(e);
-        }
 
         String[] names;
         try {

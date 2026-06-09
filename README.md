@@ -6,7 +6,7 @@
 ## Version de test locale
 1. Compiler proprement
 ```bash
-javac -d bin (Get-ChildItem -Recurse -Filter *.java | ForEach-Object { $_.FullName })
+javac -d bin *.java
 ```
 2. Lancer un Worker (peut être utilisée plusieurs fois pour plusieurs Workers)
 ```bash
