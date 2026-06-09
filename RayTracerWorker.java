@@ -1,7 +1,7 @@
-import java.rmi.server.UnicastRemoteObject;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.rmi.server.UnicastRemoteObject;
 import raytracer.Scene;
 import raytracer.Image;
 
@@ -18,78 +18,30 @@ public class RaytracerWorker extends UnicastRemoteObject implements InterfaceRay
         return scene.compute(x, y, width, height);
     }
 
-    private static class RegistryProxyImpl extends java.rmi.server.UnicastRemoteObject implements RegistryProxy {
-        private Registry registry;
-        public RegistryProxyImpl(Registry reg) throws RemoteException {
-            this.registry = reg;
-        }
-        public void rebind(String n, java.rmi.Remote obj) throws RemoteException {
-            registry.rebind(n, obj);
-        }
-    }
-
-    private static RegistryProxyImpl proxyInstance;
-
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         String sceneFile = args.length > 0 ? args[0] : "simple.txt";
         int totalWidth = args.length > 1 ? Integer.parseInt(args[1]) : 512;
         int totalHeight = args.length > 2 ? Integer.parseInt(args[2]) : 512;
-        String host = args.length > 3 ? args[3] : "localhost";
-        int port = args.length > 4 ? Integer.parseInt(args[4]) : 1099;
-
-        if ("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)) {
-            System.setProperty("java.rmi.server.hostname", "127.0.0.1");
-        }
-
-        String name = null;
-        Registry registryForNaming = null;
-        try {
-            registryForNaming = LocateRegistry.getRegistry(host, port);
-            String[] bindings = registryForNaming.list();
-            int count = 0;
-            for (String b : bindings)
-                if (b.startsWith("worker-"))
-                    count++;
-            name = "worker-" + (count + 1);
-        } catch (Throwable t) {
-            name = "worker-1";
-        }
-
-        RaytracerWorker worker = new RaytracerWorker(sceneFile, totalWidth, totalHeight);
-        Registry registry;
-        try {
-            registry = LocateRegistry.getRegistry(host, port);
-            registry.list();
-        } catch (RemoteException e) {
-            if (!"localhost".equalsIgnoreCase(host) && !"127.0.0.1".equals(host)) {
-                throw e;
-            }
-            registry = LocateRegistry.createRegistry(port);
-        }
+        
+        // IP de CETTE machine (la machine où tourne le worker)
+        String myIp = "10.247.22.44"; 
+        int port = 1099;
 
         try {
-            // Tentative de rebind direct (fonctionne si local)
-            registry.rebind(name, worker);
-            
-            // Si on a réussi, on est local, on peut aussi publier le proxy
-            try {
-                if (proxyInstance == null) {
-                    proxyInstance = new RegistryProxyImpl(registry);
-                    registry.rebind("RegistryProxy", proxyInstance);
-                }
-            } catch (Exception e) {}
-            
-        } catch (java.rmi.AccessException e) {
-            // Echec car distant, utilisation du proxy
-            try {
-                RegistryProxy proxy = (RegistryProxy) registry.lookup("RegistryProxy");
-                proxy.rebind(name, worker);
-            } catch (Exception ex) {
-                System.err.println("Erreur: Impossible de contacter le registre distant et aucun RegistryProxy n'est disponible.");
-                System.err.println("Solution: Démarrez d'abord un RaytracerWorker sur la machine maître (localhost).");
-                throw ex;
-            }
+            // Indiquez au système l'adresse à publier
+            System.setProperty("java.rmi.server.hostname", myIp);
+
+            // création du registre LOCAL (c'est ici que le rebind est autorisé)
+            Registry registry = LocateRegistry.createRegistry(port);
+
+            // Création et enregistrement
+            RaytracerWorker worker = new RaytracerWorker(sceneFile, totalWidth, totalHeight);
+            registry.rebind("RaytracerWorker", worker);
+
+            System.out.println("Worker démarré et enregistré localement sur " + myIp + ":" + port);
+        } catch (Exception e) {
+            System.err.println("Erreur au démarrage du Worker:");
+            e.printStackTrace();
         }
-        System.out.println("Worker prêt : " + name + " sur " + host + ":" + port);
     }
 }
