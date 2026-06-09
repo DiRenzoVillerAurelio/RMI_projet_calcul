@@ -7,34 +7,43 @@ import raytracer.Image;
 
 public class RaytracerWorker extends UnicastRemoteObject implements InterfaceRaytracer {
     private Scene scene;
+    private String sceneFile;
 
-    public RaytracerWorker(String sceneFile, int totalWidth, int totalHeight) throws RemoteException {
+    public RaytracerWorker(String sceneFile) throws RemoteException {
         super();
-        this.scene = new Scene(sceneFile, totalWidth, totalHeight);
+        this.sceneFile = sceneFile;
     }
 
+    public void configureScene(int totalWidth, int totalHeight) throws RemoteException {
+        // On initialise la scène avec les vraies dimensions fournies par le Master
+        this.scene = new Scene(this.sceneFile, totalWidth, totalHeight);
+    }
+    
     @Override
     public Image computeRMI(int x, int y, int width, int height) throws RemoteException {
         // C'est cette méthode qui exécute le calcul réel du Raytracer à la demande du
         // Master
-        Image resultat = scene.compute(x, y, width, height);
+        
+        if (this.scene == null) {
+            // Optionnel : prendre des dimensions par défaut ou lever une erreur
+            this.scene = new Scene(this.sceneFile, 512, 512); 
+        }
 
+        Image resultat = scene.compute(x, y, width, height);
         // Ajoutez ceci pour le diagnostic :
         System.out.println("Taille de l'image calculée : " + resultat.getWidth() + "x" + resultat.getHeight());
         System.out.println("Couleur du premier pixel localement : " + resultat.getPixel(0, 0)); // (Adaptez la méthode
                                                                                                 // selon votre code)
 
-        return scene.compute(x, y, width, height);
+        return resultat; 
     }
 
     public static void main(String[] args) {
         // Récupération des arguments (Fichier, dimensions)
-        String sceneFile = args.length > 1 ? args[1] : "simple.txt";
-        int totalWidth = args.length > 2 ? Integer.parseInt(args[2]) : 512;
-        int totalHeight = args.length > 3 ? Integer.parseInt(args[3]) : 512;
+        String myIp = args.length > 1 ? args[1] : "" ;
+        String sceneFile = args.length > 2 ? args[2] : "simple.txt";
+        
 
-        // IP de CETTE machine (la machine où tourne ce worker précis)
-       String myIp = "10.247.22.44"; 
     int port = 1099;
 
     try {
@@ -62,7 +71,7 @@ public class RaytracerWorker extends UnicastRemoteObject implements InterfaceRay
         } catch (Exception e) { name = "worker-1"; }
 
         // 4. Enregistrement
-        RaytracerWorker worker = new RaytracerWorker(sceneFile, totalWidth, totalHeight);
+        RaytracerWorker worker = new RaytracerWorker(sceneFile);
         registry.rebind(name, worker);
         
         System.out.println("Worker prêt sous le nom : " + name);

@@ -1,5 +1,8 @@
 import java.time.Instant;
 import java.time.Duration;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.ArrayList;
@@ -47,12 +50,12 @@ public class LancerRaytracer {
         int hauteur = args.length > 3 ? Integer.parseInt(args[3]) : 512;
         int port = 1099;
 
-        // Vos machines sur le réseau
-        String[] hosts = {
-                "10.247.22.44",
-                // Ajoutez d'autres IPs ici
-        };
+        // machines sur le réseau
+        List<String> hosts = loadHostsFromFile("workers.txt");
 
+        if (hosts.isEmpty()) {
+            System.out.println("Attention : Aucun hôte trouvé dans workers.txt. Calcul en local.");
+        }
         System.out.println("Master : Recherche dynamique de tous les workers...");
         List<InterfaceRaytracer> allWorkers = new ArrayList<>();
 
@@ -72,6 +75,16 @@ public class LancerRaytracer {
                 }
             } catch (Exception e) {
                 System.err.println(" -> Impossible de scanner la machine " + ip + " : " + e.getMessage());
+            }
+        }
+
+        for (InterfaceRaytracer worker : allWorkers) {
+            try {
+                // Le Master impose la résolution totale à tous les workers connectés
+                worker.configureScene(largeur, hauteur);
+                System.out.println("Worker configuré en " + largeur + "x" + hauteur);
+            } catch (Exception e) {
+                System.err.println("Impossible de configurer le worker : " + e.getMessage());
             }
         }
 
@@ -142,5 +155,22 @@ public class LancerRaytracer {
             this.y0 = y0;
             this.image = image;
         }
+    }
+
+    private static List<String> loadHostsFromFile(String filename) {
+        List<String> hosts = new ArrayList<>();
+        try {
+            List<String> lines = Files.readAllLines(Paths.get(filename));
+            for (String line : lines) {
+                line = line.trim();
+                // On ignore les lignes vides et les commentaires
+                if (!line.isEmpty() && !line.startsWith("#")) {
+                    hosts.add(line);
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Erreur : Impossible de lire le fichier " + filename + " - " + e.getMessage());
+        }
+        return hosts;
     }
 }

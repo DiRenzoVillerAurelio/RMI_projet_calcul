@@ -1,0 +1,3 @@
+# Liste des adresses IP des machines (une par ligne)
+# Les lignes commençant par # seront ignorées
+10.247.22.44
