@@ -62,9 +62,7 @@ public class LancerRaytracer {
         // Ici on calcule toute l'image (0,0) -> (largeur, hauteur)
         
         int x0 = 0, y0 = 0;
-        int x1 = 256, y1 = 256;
-        int l = largeur/2, h = hauteur/2;
-                
+                        
         // Chronométrage du temps de calcul
         Instant debut = Instant.now();
         System.out.println("Calcul de l'image :\n - Coordonnées : "+x0+","+y0
